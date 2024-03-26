@@ -191,3 +191,74 @@ phrase = "Student is very much interested in Mathematics and Physics"
 predicted_tags = predict_tags(phrase)
 print("Predicted tags for the phrase:", predicted_tags)
 
+"""NEW APPROACH"""
+
+import pandas as pd
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
+from collections import Counter
+import string
+nltk.download('stopwords')
+nltk.download('wordnet')
+# Assuming 'Description' is a column in your DataFrame
+# Load your dataset
+df = pd.read_csv("/content/Final_pd.csv")
+
+# Initialize NLTK tools
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
+
+def preprocess_and_tokenize(text):
+    # Convert to lowercase
+    text = text.lower()
+    # Remove punctuation
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    # Tokenize
+    words = word_tokenize(text)
+    # Remove stop words and lemmatize
+    tokens = [lemmatizer.lemmatize(word) for word in words if word not in stop_words]
+    return tokens
+
+# Apply preprocessing
+df['Processed'] = df['Description'].apply(preprocess_and_tokenize)
+
+def score_terms(tokens):
+    # Count term frequencies
+    term_freq = Counter(tokens)
+    # Sort terms by frequency
+    sorted_terms = dict(sorted(term_freq.items(), key=lambda item: item[1], reverse=True))
+    return sorted_terms
+
+# Score and rank terms in descriptions
+df['Ranked_Terms'] = df['Processed'].apply(score_terms)
+
+def select_top_n_tags(ranked_terms, n=7):
+    # Select the top N terms
+    return list(ranked_terms.keys())[:n]
+
+df['Top_7_Tags'] = df['Ranked_Terms'].apply(lambda x: select_top_n_tags(x, 7))
+df.head()
+
+# Map names to their top 5 tags
+name_to_top_tags = pd.Series(df['Top_7_Tags'].values, index=df['Name']).to_dict()
+
+print(name_to_top_tags)
+
+from collections import defaultdict
+
+# This defaultdict will store counts and names for each tag
+tag_to_overall_count_and_names = defaultdict(lambda: {"count": 0, "names": defaultdict(int)})
+
+for name, tags in name_to_top_tags.items():
+    for tag in tags:
+        # Increase the overall count for the tag
+        tag_to_overall_count_and_names[tag]["count"] += 1
+        # Increase the count for this tag under this specific name
+        tag_to_overall_count_and_names[tag]["names"][name] += 1
+
+# Now, printing results as per your format:
+for tag, info in tag_to_overall_count_and_names.items():
+    names_counts = ', '.join([f"{name} - {count}" for name, count in info["names"].items()])
+    print(f"{tag.capitalize()} - {names_counts}; Total - {info['count']}")
+
