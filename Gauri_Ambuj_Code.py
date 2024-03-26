@@ -84,6 +84,7 @@ df.head()
 import pandas as pd
 from nltk.tokenize import word_tokenize
 from nltk import pos_tag
+nltk.download('averaged_perceptron_tagger')
 
 # Read the CSV file into a pandas DataFrame
 file_path = "/content/Final_pd.csv"
@@ -191,7 +192,7 @@ phrase = "Student is very much interested in Mathematics and Physics"
 predicted_tags = predict_tags(phrase)
 print("Predicted tags for the phrase:", predicted_tags)
 
-"""NEW APPROACH"""
+"""## 1st Solutions"""
 
 import pandas as pd
 from nltk.corpus import stopwords
@@ -262,6 +263,8 @@ for tag, info in tag_to_overall_count_and_names.items():
     names_counts = ', '.join([f"{name} - {count}" for name, count in info["names"].items()])
     print(f"{tag.capitalize()} - {names_counts}; Total - {info['count']}")
 
+"""## 2 Solution - Custom Stopwords"""
+
 from nltk import pos_tag
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
@@ -329,4 +332,232 @@ for tag, names in tag_to_names.items():
 
 output_file_path = "/content/Final_pd_with_top_tagged.csv"
 data.to_csv(output_file_path, index=False)
+
+"""## 3 Solutions - implemented tf-id vectorisations
+
+"""
+
+import pandas as pd
+from nltk import pos_tag, word_tokenize
+from nltk.corpus import stopwords
+from sklearn.feature_extraction.text import TfidfVectorizer
+from collections import defaultdict
+
+# Load data
+data = pd.read_csv("/content/Final_pd.csv")
+
+# Function to preprocess text
+def preprocess_text(text):
+    tokens = word_tokenize(text.lower())
+    # Filter out stopwords, verbs, and adjectives
+    filtered_tokens = [word for word in tokens if word not in stopwords.words('english') and pos_tag([word])[0][1] not in ['VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ', 'JJ']]
+    return ' '.join(filtered_tokens)
+
+# Preprocess descriptions
+data['processed_description'] = data['Description'].apply(preprocess_text)
+
+# TF-IDF vectorization
+tfidf_vectorizer = TfidfVectorizer()
+tfidf_matrix = tfidf_vectorizer.fit_transform(data['processed_description'])
+features = tfidf_vectorizer.get_feature_names_out()
+
+# Function to extract top 7 tags
+def extract_top_tags(row_data, features, n=7):
+    sorted_indices = row_data.argsort()[-n:][::-1]
+    return [features[i] for i in sorted_indices]
+
+# Extract top tags for each row
+data['top_tags'] = [extract_top_tags(row, features) for row in tfidf_matrix.toarray()]
+
+# Update CSV with tags and ranks
+for i, tags in enumerate(data['top_tags']):
+    for j, tag in enumerate(tags):
+        data.at[i, f"Tag{j+1}"] = tag
+
+# Map names to tags
+name_to_tags = defaultdict(list)
+for idx, row in data.iterrows():
+    name = row['Name']
+    tags = row['top_tags']
+    for tag in tags:
+        name_to_tags[name].append(tag)
+
+# Count occurrences of each tag across all names
+tag_to_names = defaultdict(lambda: defaultdict(int))
+for name, tags in name_to_tags.items():
+    for tag in tags:
+        tag_to_names[tag][name] += 1
+
+# Print tag occurrences and associated names
+for tag, names in tag_to_names.items():
+    count = sum(names.values())
+    names_str = ', '.join([f"{name} - {count}" for name, count in names.items()])
+    print(f"{tag.capitalize()} - {names_str}; Total: {count}")
+
+# Function to search for tags and update the dictionary
+def search_tags(tag):
+    tag_dict = defaultdict(list)
+    for name, tags in name_to_tags.items():
+        if tag in tags:
+            tag_dict[tag].append(name)
+    return tag_dict
+
+# Example: Search for a tag
+tag_to_search = "Physics"
+search_result = search_tags(tag_to_search)
+print(f"Search Result for Tag '{tag_to_search}': {search_result}")
+
+# Save updated CSV
+data.to_csv("/content/updated_csv_file.csv", index=False)
+
+"""## 4th Solutions - Implementaed Spacy with tf-id
+
+"""
+
+import pandas as pd
+import spacy
+from sklearn.feature_extraction.text import TfidfVectorizer
+from collections import defaultdict
+
+# Load spaCy model
+nlp = spacy.load("en_core_web_sm")
+
+# Read the CSV file into a pandas DataFrame
+file_path = "/content/Final_pd.csv"
+data = pd.read_csv(file_path)
+
+# Function to preprocess text and extract features using TF-IDF
+def preprocess_and_extract_features(text):
+    # Tokenize text and filter out stopwords and irrelevant words
+    tokens = [token.text for token in nlp(text) if not token.is_stop and not token.is_punct]
+    return " ".join(tokens)
+
+# Preprocess descriptions and extract features using TF-IDF
+data['processed_description'] = data['Description'].apply(preprocess_and_extract_features)
+tfidf_vectorizer = TfidfVectorizer(max_features=10000)
+tfidf_matrix = tfidf_vectorizer.fit_transform(data['processed_description'])
+
+# Get feature names
+feature_names = tfidf_vectorizer.get_feature_names_out()
+
+# Map names to their top 7 tags with weights
+name_to_top_tags = defaultdict(lambda: defaultdict(float))
+for i, row in data.iterrows():
+    doc_weights = tfidf_matrix[i].toarray()[0]
+    top_indices = doc_weights.argsort()[-7:][::-1]
+    for idx in top_indices:
+        name_to_top_tags[row['Name']][feature_names[idx]] = doc_weights[idx]
+
+# Map tags to names and count occurrences
+tag_to_names = defaultdict(lambda: defaultdict(int))
+for name, tags in name_to_top_tags.items():
+    for tag, weight in tags.items():
+        tag_to_names[tag][name] += 1
+
+# Update the DataFrame with top tags and weights
+top_tags = []
+tag_weights = []
+for index, row in data.iterrows():
+    tags = list(name_to_top_tags[row['Name']].keys())
+    weights = list(name_to_top_tags[row['Name']].values())
+    if len(tags) < 7:
+        tags += [''] * (7 - len(tags))  # Fill missing tags with empty strings
+        weights += [0.0] * (7 - len(weights))  # Fill missing weights with zeros
+    top_tags.append(tags)
+    tag_weights.append(weights)
+
+data['Top_7_Tags'] = top_tags
+data['Tag_Weights'] = tag_weights
+
+# Save the updated DataFrame to a new CSV file
+new_file_path = "/content/New_Final_pd1.csv"
+data.to_csv(new_file_path, index=False)
+
+# Print tag-to-names mapping with occurrences
+for tag, names in tag_to_names.items():
+    count = sum(names.values())
+    print(f"{tag.capitalize()} - {names} - Total: {count}")
+
+"""## 5. COMBINING TWO APPROACHES
+
+
+
+
+"""
+
+import pandas as pd
+import spacy
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+from collections import Counter
+import string
+import nltk
+from collections import defaultdict
+
+# Download NLTK resources
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+# Load spaCy model
+nlp = spacy.load("en_core_web_sm")
+
+# Load your dataset
+df = pd.read_csv("/content/Final_pd.csv")
+
+# Initialize NLTK tools
+stop_words = set(stopwords.words('english'))
+lemmatizer = WordNetLemmatizer()
+
+def preprocess_and_tokenize(text):
+    # Tokenize text using spaCy
+    doc = nlp(text)
+    # Filter out stopwords, punctuation, and lemmatize tokens
+    tokens = [token.lemma_ for token in doc if token.text.lower() not in stop_words and token.text not in string.punctuation]
+    return tokens
+
+# Apply preprocessing
+df['Processed'] = df['cleaned_lemmatized_description'].apply(preprocess_and_tokenize)
+
+def score_terms(tokens):
+    # Count term frequencies
+    term_freq = Counter(tokens)
+    # Sort terms by frequency
+    sorted_terms = dict(sorted(term_freq.items(), key=lambda item: item[1], reverse=True))
+    return sorted_terms
+
+# Score and rank terms in descriptions
+df['Ranked_Terms'] = df['Processed'].apply(score_terms)
+
+def select_top_n_tags(ranked_terms, n=7):
+    # Select the top N terms
+    return list(ranked_terms.keys())[:n]
+
+# Select top 7 tags for each description
+df['Top_7_Tags'] = df['Ranked_Terms'].apply(lambda x: select_top_n_tags(x, 7))
+
+# Map names to their top 7 tags
+name_to_top_tags = pd.Series(df['Top_7_Tags'].values, index=df['Name']).to_dict()
+
+# Initialize defaultdict to store counts and names for each tag
+tag_to_overall_count_and_names = defaultdict(lambda: {"count": 0, "names": defaultdict(int)})
+
+# Update counts and names for each tag
+for name, tags in name_to_top_tags.items():
+    for tag in tags:
+        # Increase the overall count for the tag
+        tag_to_overall_count_and_names[tag]["count"] += 1
+        # Increase the count for this tag under this specific name
+        tag_to_overall_count_and_names[tag]["names"][name] += 1
+
+# Add tag counts and names to DataFrame
+df['Tag_Counts'] = df['Top_7_Tags'].apply(lambda tags: {tag: tag_to_overall_count_and_names[tag]["count"] for tag in tags})
+df['Tag_Names'] = df['Top_7_Tags'].apply(lambda tags: {tag: ", ".join([f"{name} - {count}" for name, count in tag_to_overall_count_and_names[tag]["names"].items()]) for tag in tags})
+
+for tag, info in tag_to_overall_count_and_names.items():
+    names_counts = ', '.join([f"{name} - {count}" for name, count in info["names"].items()])
+    print(f"{tag.capitalize()} - {names_counts}; Total - {info['count']}")
+
+# Save DataFrame to a new CSV file
+new_file_path = "/content/New_Final_pd_with_tags.csv"
+df.to_csv(new_file_path, index=False)
 
