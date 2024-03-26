@@ -221,7 +221,7 @@ def preprocess_and_tokenize(text):
     return tokens
 
 # Apply preprocessing
-df['Processed'] = df['Description'].apply(preprocess_and_tokenize)
+df['Processed'] = df['cleaned_lemmatized_description'].apply(preprocess_and_tokenize)
 
 def score_terms(tokens):
     # Count term frequencies
@@ -261,4 +261,68 @@ for name, tags in name_to_top_tags.items():
 for tag, info in tag_to_overall_count_and_names.items():
     names_counts = ', '.join([f"{name} - {count}" for name, count in info["names"].items()])
     print(f"{tag.capitalize()} - {names_counts}; Total - {info['count']}")
+
+from nltk import pos_tag
+from nltk.tokenize import word_tokenize
+from nltk.corpus import stopwords
+from sklearn.feature_extraction.text import TfidfVectorizer
+import pandas as pd
+from collections import defaultdict
+
+# Assuming data is loaded into a DataFrame `data`
+data = pd.read_csv("/content/Final_pd.csv")
+
+# Custom stopwords
+custom_stopwords = {'dedicated', 'life', 'passion', 'interest'}  # Extend as needed
+stop_words = set(stopwords.words('english')).union(custom_stopwords)
+
+# Function to tokenize, remove custom stopwords and verbs
+def tokenize_and_filter(text):
+    tokens = word_tokenize(text.lower())  # Tokenize and lower case
+    filtered_tokens = [word for word in tokens if word not in stop_words]  # Remove custom stopwords
+    # POS tagging and filter out verbs (keep nouns, NN; you might also keep adjectives, JJ)
+    tagged = pos_tag(filtered_tokens)
+    nouns_adjectives = [word for word, tag in tagged if tag.startswith('NN') or tag.startswith('JJ')]
+    return ' '.join(nouns_adjectives)
+
+# Apply the function to the descriptions
+data['filtered_description'] = data['Description'].apply(tokenize_and_filter)
+
+# Initialize TF-IDF Vectorizer
+tfidf_vectorizer = TfidfVectorizer()
+
+# Fit TF-IDF on the filtered descriptions
+tfidf_matrix = tfidf_vectorizer.fit_transform(data['filtered_description'])
+
+# Extract feature names to map back to words
+features = tfidf_vectorizer.get_feature_names_out()
+
+### Step 3: Extracting Top 7 Tags
+
+def get_top_n_tags(row_data, features, n=7):
+    # Get indices sorted by value in descending order
+    sorted_indices = row_data.argsort()[-n:][::-1]
+    return [features[i] for i in sorted_indices]
+
+# Extract top 7 tags for each row
+data['Top_7_Tags'] = [get_top_n_tags(row, features) for row in tfidf_matrix.toarray()]
+
+### Step 4: Map Names to Tags and Count
+
+name_to_top_tags = pd.Series(data['Top_7_Tags'].values, index=data['Name']).to_dict()
+
+print(name_to_top_tags)
+
+tag_to_names = defaultdict(lambda: defaultdict(int))
+
+# Populate tag_to_names
+for name, tags in name_to_top_tags.items():
+    for tag in tags:
+        tag_to_names[tag][name] += 1
+
+# Consolidate counts and print
+for tag, names in tag_to_names.items():
+    count = sum(names.values())  # Total count for the tag
+    names_str = ', '.join([f"{name} {names[name]}" for name in names])
+    print(f"{tag.capitalize()} - {names_str}; Total: {count}")
 
