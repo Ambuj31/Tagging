@@ -326,3 +326,7 @@ for tag, names in tag_to_names.items():
     names_str = ', '.join([f"{name} {names[name]}" for name in names])
     print(f"{tag.capitalize()} - {names_str}; Total: {count}")
 
+
+output_file_path = "/content/Final_pd_with_top_tagged.csv"
+data.to_csv(output_file_path, index=False)
+
